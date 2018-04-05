@@ -23,6 +23,7 @@ import com.mbientlab.metawear.builder.filter.Comparison;
 import com.mbientlab.metawear.builder.filter.ThresholdOutput;
 import com.mbientlab.metawear.builder.function.Function1;
 import com.mbientlab.metawear.module.Accelerometer;
+import com.mbientlab.metawear.module.Logging;
 
 import bolts.Continuation;
 import bolts.Task;
@@ -31,6 +32,7 @@ public class MainActivity extends Activity implements ServiceConnection {
     private BtleService.LocalBinder serviceBinder;
     private MetaWearBoard board;
     private Accelerometer accelerometer;
+    private Logging logging;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -43,6 +45,7 @@ public class MainActivity extends Activity implements ServiceConnection {
             @Override
             public void onClick(View v) {
                 Log.i("frefall","start" );
+                logging.start(false);
                 accelerometer.acceleration().start();
                 accelerometer.start();
             }
@@ -53,6 +56,20 @@ public class MainActivity extends Activity implements ServiceConnection {
                 Log.i("freefall", "stop");
                 accelerometer.stop();
                 accelerometer.acceleration().stop();
+                logging.stop();
+                logging.downloadAsync().continueWith(new Continuation<Void, Void>() {
+                    @Override
+                    public Void then(Task<Void> task) throws Exception{
+                        if(task.isFaulted()){
+                            Log.i("freefall", "Log download failed");
+                        }
+                        else
+                        {
+                            Log.i("freefall", "log downlaod complete");
+                        }
+                        return null;
+                    }
+                });
             }
         });
         findViewById(R.id.reset).setOnClickListener(new View.OnClickListener(){
@@ -91,6 +108,8 @@ public class MainActivity extends Activity implements ServiceConnection {
             @Override
             public Task<Route> then(Task<Void> task) throws Exception {
                 Log.i("freefall", "connect to " + macAddr);
+
+                logging = board.getModule(Logging.class);
                 accelerometer = board.getModule(Accelerometer.class);
                 accelerometer.configure()
                         .odr(60f)
@@ -100,16 +119,16 @@ public class MainActivity extends Activity implements ServiceConnection {
                     public void configure(RouteComponent source) {
                         source.map(Function1.RSS).average((byte) 4).filter(ThresholdOutput.BINARY, 0.5f)
                                 .multicast()
-                                .to().filter(Comparison.EQ, -1).stream(new Subscriber(){
+                                .to().filter(Comparison.EQ, -1).log(new Subscriber(){
                                     @Override
                                     public void apply(Data data, Object... env) {
-                                        Log.i("frefall", data.value(Accelerometer.class).toString());
+                                        Log.i("frefall", data.formattedTimestamp() + ": in freefall");
                                     }
                                 })
-                                .to().filter(Comparison.EQ, 1).stream(new Subscriber(){
+                                .to().filter(Comparison.EQ, 1).log(new Subscriber(){
                                     @Override
                                     public void apply(Data data, Object... env) {
-                                        Log.i("frefall", "no freefall");
+                                        Log.i("frefall", data.formattedTimestamp() + ": no freefall");
                                     }
                                 })
                                 .end();
